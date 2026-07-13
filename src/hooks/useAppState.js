@@ -105,7 +105,6 @@ export function useAppState() {
     });
   }, []);
 
-  
   const loadDirectoryChildren = useCallback(async (dirPath) => {
     try {
       const children = await api.getFiles(dirPath);
@@ -349,9 +348,6 @@ export function useAppState() {
         const newHistory = [...s.history];
         if (result.stdout) newHistory.push({ type: "stdout", content: result.stdout });
         if (result.stderr) newHistory.push({ type: "stderr", content: result.stderr });
-        if (!result.stdout && !result.stderr && result.exit_code === 0 && result.cwd !== cwd) {
-          
-        }
         return { ...s, history: newHistory, cwd: result.cwd || s.cwd };
       }));
     } catch (err) {

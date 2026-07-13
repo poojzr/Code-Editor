@@ -11,7 +11,6 @@ import DebugConsole from "./DebugConsole";
 import PortsPanel from "./PortsPanel";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
-import FolderPicker from "./FolderPicker";
 import { useAppState } from "../hooks/useAppState";
 
 export default function App() {
@@ -20,10 +19,10 @@ export default function App() {
     workspace, openFiles, activeFileId, sidebarVisible, sidebarWidth,
     bottomPanelVisible, bottomPanelHeight, activeBottomTab, problems,
     outputs, debugLogs, ports, terminalSessions, activeTerminalId,
-    showFolderPicker, contextMenu, fileTree, autoSave,
+    contextMenu, fileTree, autoSave,
     expandedPaths, isDebugging,
     setSidebarWidth, setBottomPanelHeight, setActiveBottomTab,
-    setSidebarVisible, setBottomPanelVisible, setShowFolderPicker,
+    setSidebarVisible, setBottomPanelVisible, 
     openFile, closeFile, setActiveFile, saveFile, saveAllFiles, updateFileContent,
     createFile, createFolder, deleteItem, renameItem, copyItem, pasteItem,
     openWorkspace, refreshExplorer, runFile, executeTerminalCommand,
@@ -103,13 +102,24 @@ export default function App() {
     }
   }, [activeBottomTab, bottomPanelVisible, refreshPorts]);
 
-  const handleOpenFolder = useCallback(() => {
-    setShowFolderPicker(true);
-  }, [setShowFolderPicker]);
-
-  const handleSelectFolder = useCallback((path) => {
-    openWorkspace(path);
+  
+  const handleOpenFolder = useCallback(async () => {
+    if (!('showDirectoryPicker' in window)) {
+      alert('Please use Chrome or Edge browser for folder access');
+      return;
+    }
+    try {
+      const dirHandle = await window.showDirectoryPicker();
+      
+      openWorkspace(dirHandle.name);
+    } catch (err) {
+      if (err.name !== 'AbortError' && err.name !== 'CancelError') {
+        console.error('Error opening folder:', err);
+        alert('Could not open folder. Please try again.');
+      }
+    }
   }, [openWorkspace]);
+
 
   const handleShowPanel = useCallback((tab) => {
     setActiveBottomTab(tab);
@@ -291,7 +301,7 @@ export default function App() {
                     onClick={() => setBottomPanelVisible(false)}
                     className="text-[#888] hover:text-white p-1 text-xs"
                     title="Close Panel"
-                  >✕</button>
+                  >X</button>
                 </div>
                 <div className="flex-1 overflow-hidden select-text">
                   {activeBottomTab === "terminal" && (
@@ -323,13 +333,6 @@ export default function App() {
         problems={problems}
         isDebugging={isDebugging}
       />
-
-      {showFolderPicker && (
-        <FolderPicker
-          onSelect={handleSelectFolder}
-          onClose={() => setShowFolderPicker(false)}
-        />
-      )}
 
       {contextMenu && (
         <ContextMenu

@@ -134,12 +134,7 @@ async def get_problems():
 
 @router.get("/workspace/browse")
 async def browse_directory(path: str = Query(default=None)):
-    import os
-    target = path or os.path.expanduser("~")
-    try:
-        return {"path": target, "entries": services.list_subdirectories(target)}
-    except (FileNotFoundError, NotADirectoryError) as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    return {"path": "", "entries": []}
 
 
 @router.get("/workspace/ports")

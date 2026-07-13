@@ -125,6 +125,5 @@ export async function getPorts() {
 }
 
 export async function browseDirectories(path) {
-  const param = path ? `?path=${encodeURIComponent(path)}` : "";
-  return request(`/workspace/browse${param}`);
+  return { path: path || '', entries: [] };
 }
