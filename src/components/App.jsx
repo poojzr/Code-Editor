@@ -22,7 +22,7 @@ export default function App() {
     contextMenu, fileTree, autoSave,
     expandedPaths, isDebugging,
     setSidebarWidth, setBottomPanelHeight, setActiveBottomTab,
-    setSidebarVisible, setBottomPanelVisible, 
+    setSidebarVisible, setBottomPanelVisible,
     openFile, closeFile, setActiveFile, saveFile, saveAllFiles, updateFileContent,
     createFile, createFolder, deleteItem, renameItem, copyItem, pasteItem,
     openWorkspace, refreshExplorer, runFile, executeTerminalCommand,
@@ -102,7 +102,6 @@ export default function App() {
     }
   }, [activeBottomTab, bottomPanelVisible, refreshPorts]);
 
-  
   const handleOpenFolder = useCallback(async () => {
     if (!('showDirectoryPicker' in window)) {
       alert('Please use Chrome or Edge browser for folder access');
@@ -110,7 +109,7 @@ export default function App() {
     }
     try {
       const dirHandle = await window.showDirectoryPicker();
-      
+      window.__dirHandle = dirHandle;
       openWorkspace(dirHandle.name);
     } catch (err) {
       if (err.name !== 'AbortError' && err.name !== 'CancelError') {
@@ -119,7 +118,6 @@ export default function App() {
       }
     }
   }, [openWorkspace]);
-
 
   const handleShowPanel = useCallback((tab) => {
     setActiveBottomTab(tab);
@@ -301,7 +299,7 @@ export default function App() {
                     onClick={() => setBottomPanelVisible(false)}
                     className="text-[#888] hover:text-white p-1 text-xs"
                     title="Close Panel"
-                  >X</button>
+                  >✕</button>
                 </div>
                 <div className="flex-1 overflow-hidden select-text">
                   {activeBottomTab === "terminal" && (
@@ -362,19 +360,19 @@ function WelcomeScreen({ onOpenFolder }) {
           <div className="flex flex-col items-start gap-1 pt-4 text-xs text-[#666]">
             <div className="flex items-center gap-2">
               <span className="text-[#888]">Ctrl+S</span>
-              <span>— Save</span>
+              <span>Save</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[#888]">Ctrl+B</span>
-              <span>— Toggle Sidebar</span>
+              <span>Toggle Sidebar</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[#888]">Ctrl+`</span>
-              <span>— Toggle Terminal</span>
+              <span>Toggle Terminal</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[#888]">Ctrl+F5</span>
-              <span>— Run File</span>
+              <span>Run File</span>
             </div>
           </div>
         </div>

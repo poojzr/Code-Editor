@@ -8,13 +8,14 @@ export default function FolderPicker({ onSelect, onClose }) {
 
   const openFolderPicker = async () => {
     if (!('showDirectoryPicker' in window)) {
-      alert('Your browser does not support folder access. Please use Chrome or Edge.');
+      alert('Please use Chrome or Edge browser for folder access');
       return;
     }
 
     setLoading(true);
     try {
       const dirHandle = await window.showDirectoryPicker();
+      window.__dirHandle = dirHandle;
       
       const entries = [];
       for await (const [name, handle] of dirHandle.entries()) {
@@ -34,13 +35,13 @@ export default function FolderPicker({ onSelect, onClose }) {
 
       setSelectedFolder({
         name: dirHandle.name,
+        handle: dirHandle,
         entries: entries
       });
       setFolderContents(entries);
     } catch (err) {
       if (err.name !== 'AbortError' && err.name !== 'CancelError') {
         console.error('Error opening folder:', err);
-        alert('Could not open folder. Please try again.');
       }
     }
     setLoading(false);

@@ -28,17 +28,6 @@ const updateChildrenInTree = (nodes, targetPath, children) => {
   });
 };
 
-const mergeTrees = (newNodes, oldNodes) => {
-  const oldMap = new Map((oldNodes || []).map(n => [n.path, n]));
-  return newNodes.map(node => {
-    const old = oldMap.get(node.path);
-    if (old?.children) {
-      return { ...node, children: old.children };
-    }
-    return node;
-  });
-};
-
 export function useAppState() {
   const [workspace, setWorkspace] = useState(null);
   const [fileTree, setFileTree] = useState([]);
@@ -65,14 +54,51 @@ export function useAppState() {
   const [clipboard, setClipboard] = useState(null);
   const autoSaveTimerRef = useRef(null);
 
+  const getDirHandle = () => {
+    const handle = window.__dirHandle;
+    if (!handle) {
+      throw new Error("No folder selected. Please open a folder first.");
+    }
+    return handle;
+  };
+
+  const readDirectory = async (dirHandle, path = "") => {
+    const entries = [];
+    for await (const [name, handle] of dirHandle.entries()) {
+      const entryPath = path ? `${path}/${name}` : name;
+      entries.push({
+        name: name,
+        path: entryPath,
+        type: handle.kind === 'directory' ? 'directory' : 'file',
+        children: handle.kind === 'directory' ? [] : undefined,
+        handle: handle
+      });
+    }
+    entries.sort((a, b) => {
+      if (a.type === 'directory' && b.type !== 'directory') return -1;
+      if (a.type !== 'directory' && b.type === 'directory') return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return entries;
+  };
+
   const openWorkspace = useCallback(async (folderPath) => {
     if (!folderPath) return;
     setShowFolderPicker(false);
+    
     try {
-      const info = await api.openWorkspace(folderPath);
+      const dirHandle = getDirHandle();
+      
+      const info = {
+        path: folderPath,
+        name: folderPath,
+        exists: true
+      };
       setWorkspace(info);
-      const files = await api.getFiles(folderPath);
-      setFileTree(files);
+      
+      const entries = await readDirectory(dirHandle);
+      setFileTree(entries);
+      
       setExpandedPaths(new Set());
       setTerminalSessions([{ id: "default", name: "bash", history: [], cwd: folderPath }]);
       setActiveTerminalId("default");
@@ -82,19 +108,23 @@ export function useAppState() {
       setPorts([]);
     } catch (err) {
       console.error("Failed to open workspace:", err);
-      setDebugLogs(prev => [...prev, { type: "error", message: `Failed to open workspace: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Failed to open workspace: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, []);
 
   const refreshExplorer = useCallback(async () => {
-    if (!workspace?.path) return;
     try {
-      const files = await api.getFiles(workspace.path);
-      setFileTree(prev => mergeTrees(files, prev));
+      const dirHandle = getDirHandle();
+      const entries = await readDirectory(dirHandle);
+      setFileTree(entries);
     } catch (err) {
       console.error("Failed to refresh:", err);
     }
-  }, [workspace]);
+  }, []);
 
   const toggleExpand = useCallback((path) => {
     setExpandedPaths(prev => {
@@ -107,12 +137,19 @@ export function useAppState() {
 
   const loadDirectoryChildren = useCallback(async (dirPath) => {
     try {
-      const children = await api.getFiles(dirPath);
-      setFileTree(prev => updateChildrenInTree(prev, dirPath, children));
+      const dirHandle = getDirHandle();
+      const parts = dirPath.split('/');
+      let currentHandle = dirHandle;
+      for (const part of parts) {
+        if (part) {
+          currentHandle = await currentHandle.getDirectoryHandle(part);
+        }
+      }
+      const entries = await readDirectory(currentHandle, dirPath);
+      setFileTree(prev => updateChildrenInTree(prev, dirPath, entries));
     } catch (err) {
       console.error("Failed to load directory:", err);
       setFileTree(prev => updateChildrenInTree(prev, dirPath, []));
-      setDebugLogs(prev => [...prev, { type: "error", message: `Failed to load directory: ${err.message}`, timestamp: new Date().toISOString() }]);
     }
   }, []);
 
@@ -126,21 +163,39 @@ export function useAppState() {
       setActiveFileId(existing.id);
       return;
     }
+    
     try {
-      const data = await api.getFile(filePath);
+      const dirHandle = getDirHandle();
+      const parts = filePath.split('/');
+      const fileName = parts.pop();
+      let currentHandle = dirHandle;
+      for (const part of parts) {
+        if (part) {
+          currentHandle = await currentHandle.getDirectoryHandle(part);
+        }
+      }
+      const fileHandle = await currentHandle.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      
       const newFile = {
         id: `file-${Date.now()}`,
         path: filePath,
-        name: filePath.split(/[/\\]/).pop(),
-        content: data.content,
-        originalContent: data.content,
-        language: getLanguageFromPath(filePath),
+        name: fileName,
+        content: content,
+        originalContent: content,
+        language: getLanguageFromPath(fileName),
         dirty: false,
+        fileHandle: fileHandle
       };
       setOpenFiles(prev => [...prev, newFile]);
       setActiveFileId(newFile.id);
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Failed to open file: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Failed to open file: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [openFiles]);
 
@@ -177,17 +232,7 @@ export function useAppState() {
     if (autoSave) {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = setTimeout(() => {
-        setOpenFiles(prev => {
-          const file = prev.find(f => f.id === fileId);
-          if (file) {
-            api.saveFile(file.path, content).then(() => {
-              setOpenFiles(prev2 => prev2.map(f =>
-                f.id === fileId ? { ...f, dirty: false, originalContent: content } : f
-              ));
-            }).catch(() => {});
-          }
-          return prev;
-        });
+        saveFile(fileId);
       }, 1000);
     }
   }, [autoSave]);
@@ -195,75 +240,131 @@ export function useAppState() {
   const saveFile = useCallback(async (fileId) => {
     const file = openFiles.find(f => f.id === fileId);
     if (!file) return;
+    
     try {
-      await api.saveFile(file.path, file.content);
+      if (file.fileHandle) {
+        const writable = await file.fileHandle.createWritable();
+        await writable.write(file.content);
+        await writable.close();
+      } else {
+        await api.saveFile(file.path, file.content);
+      }
       setOpenFiles(prev => prev.map(f =>
         f.id === fileId ? { ...f, dirty: false, originalContent: file.content } : f
       ));
       setOutputs(prev => [...prev, { type: "info", message: `Saved: ${file.name}`, timestamp: new Date().toISOString() }]);
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Save failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Save failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [openFiles]);
 
   const saveAllFiles = useCallback(async () => {
     const dirtyFiles = openFiles.filter(f => f.dirty);
     for (const file of dirtyFiles) {
-      try {
-        await api.saveFile(file.path, file.content);
-        setOutputs(prev => [...prev, { type: "info", message: `Saved: ${file.name}`, timestamp: new Date().toISOString() }]);
-      } catch (err) {
-        setDebugLogs(prev => [...prev, { type: "error", message: `Save failed: ${file.name}: ${err.message}`, timestamp: new Date().toISOString() }]);
-      }
+      await saveFile(file.id);
     }
-    setOpenFiles(prev => prev.map(f => f.dirty ? { ...f, dirty: false, originalContent: f.content } : f));
-  }, [openFiles]);
+  }, [openFiles, saveFile]);
 
   const createFile = useCallback(async (parentPath, name) => {
     try {
-      const fullPath = parentPath ? `${parentPath}/${name}`.replace(/\\/g, "/") : name;
-      await api.createFile(fullPath);
+      const dirHandle = getDirHandle();
+      const parts = parentPath ? parentPath.split('/').filter(Boolean) : [];
+      let currentHandle = dirHandle;
+      for (const part of parts) {
+        if (part) {
+          currentHandle = await currentHandle.getDirectoryHandle(part);
+        }
+      }
+      await currentHandle.getFileHandle(name, { create: true });
       await refreshExplorer();
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Create file failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Create file failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [refreshExplorer]);
 
   const createFolder = useCallback(async (parentPath, name) => {
     try {
-      const fullPath = parentPath ? `${parentPath}/${name}`.replace(/\\/g, "/") : name;
-      await api.createFolder(fullPath);
+      const dirHandle = getDirHandle();
+      const parts = parentPath ? parentPath.split('/').filter(Boolean) : [];
+      let currentHandle = dirHandle;
+      for (const part of parts) {
+        if (part) {
+          currentHandle = await currentHandle.getDirectoryHandle(part);
+        }
+      }
+      await currentHandle.getDirectoryHandle(name, { create: true });
       await refreshExplorer();
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Create folder failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Create folder failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [refreshExplorer]);
 
   const deleteItem = useCallback(async (path) => {
     try {
-      await api.deleteFile(path);
+      const dirHandle = getDirHandle();
+      const parts = path.split('/');
+      const name = parts.pop();
+      const parentParts = parts.filter(Boolean);
+      let parentHandle = dirHandle;
+      for (const part of parentParts) {
+        if (part) {
+          parentHandle = await parentHandle.getDirectoryHandle(part);
+        }
+      }
+      await parentHandle.removeEntry(name, { recursive: true });
       await refreshExplorer();
       setOpenFiles(prev => prev.filter(f => !f.path.startsWith(path)));
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Delete failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Delete failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [refreshExplorer]);
 
   const renameItem = useCallback(async (oldPath, newName) => {
     try {
-      await api.renameFile(oldPath, newName);
+      const dirHandle = getDirHandle();
+      const parts = oldPath.split('/');
+      const oldName = parts.pop();
+      const parentParts = parts.filter(Boolean);
+      let parentHandle = dirHandle;
+      for (const part of parentParts) {
+        if (part) {
+          parentHandle = await parentHandle.getDirectoryHandle(part);
+        }
+      }
+      
+      const oldHandle = await parentHandle.getFileHandle(oldName);
+      await oldHandle.move(newName);
+      
       await refreshExplorer();
       setOpenFiles(prev => prev.map(f => {
         if (f.path === oldPath) {
-          const parts = oldPath.split(/[/\\]/);
-          parts[parts.length - 1] = newName;
-          const newPath = parts.join('/');
+          const newPath = parentParts.length > 0 ? `${parentParts.join('/')}/${newName}` : newName;
           return { ...f, path: newPath, name: newName };
         }
         return f;
       }));
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Rename failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Rename failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [refreshExplorer]);
 
@@ -274,17 +375,46 @@ export function useAppState() {
   const pasteItem = useCallback(async (destPath) => {
     if (!clipboard) return;
     try {
-      await api.copyFile(clipboard.path, destPath);
+      const dirHandle = getDirHandle();
+      
+      const destParts = destPath ? destPath.split('/').filter(Boolean) : [];
+      const destName = destParts.pop() || 'copied';
+      let destParentHandle = dirHandle;
+      for (const part of destParts) {
+        if (part) {
+          destParentHandle = await destParentHandle.getDirectoryHandle(part);
+        }
+      }
+      
+      const sourceParts = clipboard.path.split('/');
+      const sourceName = sourceParts.pop();
+      const sourceParentParts = sourceParts.filter(Boolean);
+      let sourceParentHandle = dirHandle;
+      for (const part of sourceParentParts) {
+        if (part) {
+          sourceParentHandle = await sourceParentHandle.getDirectoryHandle(part);
+        }
+      }
+      
+      const sourceHandle = await sourceParentHandle.getFileHandle(sourceName);
+      const newPath = destPath ? `${destPath}/${sourceName}` : sourceName;
+      await sourceHandle.move(newPath);
+      
       await refreshExplorer();
+      setClipboard(null);
     } catch (err) {
-      setDebugLogs(prev => [...prev, { type: "error", message: `Paste failed: ${err.message}`, timestamp: new Date().toISOString() }]);
+      setDebugLogs(prev => [...prev, { 
+        type: "error", 
+        message: `Paste failed: ${err.message}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     }
   }, [clipboard, refreshExplorer]);
 
   const runFile = useCallback(async (filePath) => {
     setBottomPanelVisible(true);
     setActiveBottomTab("output");
-    const fileName = filePath.split(/[/\\]/).pop();
+    const fileName = filePath.split('/').pop();
     setProblems([]);
     setOutputs(prev => [...prev, { type: "info", message: `Running: ${fileName}`, timestamp: new Date().toISOString() }]);
     try {
@@ -297,8 +427,6 @@ export function useAppState() {
       }
       if (result.problems?.length) {
         setProblems(result.problems);
-      } else {
-        setProblems([]);
       }
       if (result.port) {
         setPorts(prev => {
@@ -321,7 +449,7 @@ export function useAppState() {
     setIsDebugging(true);
     setBottomPanelVisible(true);
     setActiveBottomTab("debug");
-    setDebugLogs(prev => [...prev, { type: "info", message: `Debug session started: ${filePath.split(/[/\\]/).pop()}`, timestamp: new Date().toISOString() }]);
+    setDebugLogs(prev => [...prev, { type: "info", message: `Debug session started: ${filePath.split('/').pop()}`, timestamp: new Date().toISOString() }]);
     await runFile(filePath);
   }, [runFile]);
 

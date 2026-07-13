@@ -23,10 +23,11 @@ export async function healthCheck() {
 }
 
 export async function openWorkspace(path) {
-  return request("/workspace/open", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
+  return { 
+    path: path, 
+    name: path.split(/[/\\]/).pop() || path, 
+    exists: true 
+  };
 }
 
 export async function getWorkspaceInfo() {
