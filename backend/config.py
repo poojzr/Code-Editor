@@ -112,4 +112,8 @@ LANGUAGE_RUNNERS = {
         "ext": [".ps1"],
         "command": "pwsh",
     },
+    "html": {
+        "ext": [".html", ".htm"],
+        "command": "echo",
+    },
 }

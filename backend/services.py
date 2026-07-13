@@ -344,10 +344,8 @@ def is_vite_project(workspace_path: str) -> bool:
 
 def run_file(file_path: str, workspace_path: Optional[str] = None, content: Optional[str] = None) -> RunResult:
     if content is not None:
-        ext = Path(file_path).suffix.lower()
-        if ext == ".java":
-            return _run_java_from_content(content, file_path)
-        with tempfile.NamedTemporaryFile(mode='w', suffix=ext, delete=False) as f:
+        suffix = Path(file_path).suffix.lower()
+        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
             f.write(content)
             temp_path = f.name
         try:
@@ -364,51 +362,6 @@ def run_file(file_path: str, workspace_path: Optional[str] = None, content: Opti
         return _run_file_from_path(str(path), workspace_path, file_path)
 
 
-def _run_java_from_content(content: str, original_path: str) -> RunResult:
-    match = re.search(r'public\s+(?:final\s+|abstract\s+)?class\s+(\w+)', content)
-    class_name = match.group(1) if match else Path(original_path).stem
-
-    temp_dir = tempfile.mkdtemp()
-    try:
-        java_file = Path(temp_dir) / f"{class_name}.java"
-        java_file.write_text(content, encoding="utf-8")
-
-        compile_cmd = f"javac {quote_path(str(java_file))}"
-        compile_result = subprocess.run(
-            compile_cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=temp_dir,
-        )
-        if compile_result.returncode != 0:
-            problems = parse_problems(compile_result.stderr, original_path)
-            return RunResult(
-                stderr=compile_result.stderr,
-                exit_code=compile_result.returncode,
-                problems=[p.model_dump() for p in problems],
-            )
-
-        run_cmd = f"java {class_name}"
-        run_result = subprocess.run(
-            run_cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=temp_dir,
-        )
-        problems = parse_problems(run_result.stderr, original_path)
-        return RunResult(
-            stdout=run_result.stdout,
-            stderr=run_result.stderr,
-            exit_code=run_result.returncode,
-            problems=[p.model_dump() for p in problems],
-        )
-    except subprocess.TimeoutExpired:
-        return RunResult(stderr="Compilation or execution timed out", exit_code=124)
-    except FileNotFoundError:
-        return RunResult(stderr="javac or java not found. Ensure JDK is installed and on PATH.", exit_code=127)
-    finally:
-        try:
-            shutil.rmtree(temp_dir)
-        except:
-            pass
-
-
 def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, original_path: Optional[str] = None) -> RunResult:
     path = Path(file_path)
     cwd = workspace_path or str(path.parent)
@@ -417,7 +370,7 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
 
     if ext in (".html", ".htm"):
         return RunResult(
-            stdout=f"Open in browser: {path.resolve().as_uri()}",
+            stdout=f"HTML file: {filename}\nOpen in browser: {path.resolve().as_uri()}",
             exit_code=0,
         )
 
@@ -443,12 +396,17 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
 
     command = runner["command"]
     quoted_path = quote_path(str(path))
-    cmd = f"{command} {quoted_path}"
+    
+    if runner.get("lang") == "python":
+        cmd = f"python3 {quoted_path}"
+    else:
+        cmd = f"{command} {quoted_path}"
 
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
             timeout=30, cwd=cwd,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"}
         )
         problems = parse_problems(result.stderr, filename)
         return RunResult(
@@ -476,10 +434,6 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
     quoted_output = quote_path(str(output_path))
 
     if runner.get("lang") == "java":
-        try:
-            shutil.rmtree(output_dir)
-        except:
-            pass
         compile_cmd = f"{compiler} {quoted_path}"
         try:
             compile_result = subprocess.run(
@@ -539,6 +493,7 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
             return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
         finally:
             try:
+                import shutil
                 shutil.rmtree(output_dir)
             except:
                 pass

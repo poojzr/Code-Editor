@@ -66,14 +66,9 @@ export function useAppState() {
     const entries = [];
     try {
       for await (const [name, handle] of dirHandle.entries()) {
+        if (name.startsWith('.')) continue;
         const entryPath = path ? `${path}/${name}` : name;
-        let isDirectory = false;
-        try {
-          const testHandle = await dirHandle.getDirectoryHandle(name);
-          isDirectory = true;
-        } catch {
-          isDirectory = false;
-        }
+        const isDirectory = handle.kind === 'directory';
         entries.push({
           name: name,
           path: entryPath,
@@ -106,7 +101,13 @@ export function useAppState() {
       setWorkspace(info);
       const entries = await readDirectory(dirHandle);
       setFileTree(entries);
-      setExpandedPaths(new Set([folderPath]));
+      const paths = new Set();
+      entries.forEach(entry => {
+        if (entry.type === 'directory') {
+          paths.add(entry.path);
+        }
+      });
+      setExpandedPaths(paths);
       setTerminalSessions([{ id: "default", name: "bash", history: [], cwd: folderPath }]);
       setActiveTerminalId("default");
       setOutputs([]);
@@ -249,11 +250,9 @@ export function useAppState() {
     if (!file) return;
     try {
       if (file.fileHandle) {
-        const writable = await file.fileHandle.createWritable();
+        const writable = await file.fileHandle.createWritable({ keepExistingData: true });
         await writable.write(file.content);
         await writable.close();
-      } else {
-        await api.saveFile(file.path, file.content);
       }
       setOpenFiles(prev => prev.map(f =>
         f.id === fileId ? { ...f, dirty: false, originalContent: file.content } : f
@@ -288,6 +287,11 @@ export function useAppState() {
       await currentHandle.getFileHandle(name, { create: true });
       const entries = await readDirectory(dirHandle);
       setFileTree(entries);
+      setDebugLogs(prev => [...prev, { 
+        type: "info", 
+        message: `File created: ${name}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     } catch (err) {
       setDebugLogs(prev => [...prev, { 
         type: "error", 
@@ -310,6 +314,11 @@ export function useAppState() {
       await currentHandle.getDirectoryHandle(name, { create: true });
       const entries = await readDirectory(dirHandle);
       setFileTree(entries);
+      setDebugLogs(prev => [...prev, { 
+        type: "info", 
+        message: `Folder created: ${name}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     } catch (err) {
       setDebugLogs(prev => [...prev, { 
         type: "error", 
@@ -335,6 +344,11 @@ export function useAppState() {
       const entries = await readDirectory(dirHandle);
       setFileTree(entries);
       setOpenFiles(prev => prev.filter(f => !f.path.startsWith(path)));
+      setDebugLogs(prev => [...prev, { 
+        type: "info", 
+        message: `Deleted: ${path}`, 
+        timestamp: new Date().toISOString() 
+      }]);
     } catch (err) {
       setDebugLogs(prev => [...prev, { 
         type: "error", 
