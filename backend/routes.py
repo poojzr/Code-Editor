@@ -104,22 +104,8 @@ async def search_files(req: SearchRequest):
 
 @router.post("/workspace/run")
 async def run_file(req: RunRequest):
-    import tempfile
-    import os
-    
-    if req.content:
-        suffix = os.path.splitext(req.file_path)[1]
-        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
-            f.write(req.content)
-            temp_path = f.name
-        try:
-            result = services.run_file(temp_path, req.workspace_path)
-        finally:
-            os.unlink(temp_path)
-        return result
-    else:
-        result = services.run_file(req.file_path, req.workspace_path)
-        return result
+    result = services.run_file(req.file_path, req.workspace_path, req.content)
+    return result
 
 @router.post("/workspace/terminal")
 async def terminal(req: TerminalRequest):

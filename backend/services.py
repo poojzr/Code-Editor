@@ -6,6 +6,7 @@ import subprocess
 import logging
 import time
 import threading
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -341,13 +342,78 @@ def is_vite_project(workspace_path: str) -> bool:
     return False
 
 
-def run_file(file_path: str, workspace_path: Optional[str] = None) -> RunResult:
-    path = Path(file_path)
-    if not path.is_file():
-        return RunResult(stderr=f"File not found: {file_path}", exit_code=1)
+def run_file(file_path: str, workspace_path: Optional[str] = None, content: Optional[str] = None) -> RunResult:
+    if content is not None:
+        ext = Path(file_path).suffix.lower()
+        if ext == ".java":
+            return _run_java_from_content(content, file_path)
+        with tempfile.NamedTemporaryFile(mode='w', suffix=ext, delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+        try:
+            return _run_file_from_path(temp_path, workspace_path, file_path)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+    else:
+        path = Path(file_path)
+        if not path.is_file():
+            return RunResult(stderr=f"File not found: {file_path}", exit_code=1)
+        return _run_file_from_path(str(path), workspace_path, file_path)
 
+
+def _run_java_from_content(content: str, original_path: str) -> RunResult:
+    match = re.search(r'public\s+(?:final\s+|abstract\s+)?class\s+(\w+)', content)
+    class_name = match.group(1) if match else Path(original_path).stem
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        java_file = Path(temp_dir) / f"{class_name}.java"
+        java_file.write_text(content, encoding="utf-8")
+
+        compile_cmd = f"javac {quote_path(str(java_file))}"
+        compile_result = subprocess.run(
+            compile_cmd, shell=True, capture_output=True, text=True,
+            timeout=30, cwd=temp_dir,
+        )
+        if compile_result.returncode != 0:
+            problems = parse_problems(compile_result.stderr, original_path)
+            return RunResult(
+                stderr=compile_result.stderr,
+                exit_code=compile_result.returncode,
+                problems=[p.model_dump() for p in problems],
+            )
+
+        run_cmd = f"java {class_name}"
+        run_result = subprocess.run(
+            run_cmd, shell=True, capture_output=True, text=True,
+            timeout=30, cwd=temp_dir,
+        )
+        problems = parse_problems(run_result.stderr, original_path)
+        return RunResult(
+            stdout=run_result.stdout,
+            stderr=run_result.stderr,
+            exit_code=run_result.returncode,
+            problems=[p.model_dump() for p in problems],
+        )
+    except subprocess.TimeoutExpired:
+        return RunResult(stderr="Compilation or execution timed out", exit_code=124)
+    except FileNotFoundError:
+        return RunResult(stderr="javac or java not found. Ensure JDK is installed and on PATH.", exit_code=127)
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
+
+
+def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, original_path: Optional[str] = None) -> RunResult:
+    path = Path(file_path)
     cwd = workspace_path or str(path.parent)
     ext = path.suffix.lower()
+    filename = original_path or str(path)
 
     if ext in (".html", ".htm"):
         return RunResult(
@@ -355,35 +421,25 @@ def run_file(file_path: str, workspace_path: Optional[str] = None) -> RunResult:
             exit_code=0,
         )
 
-    if ext in (".css", ".scss", ".less"):
-        return RunResult(
-            stdout=f"{path.name} is a stylesheet — no execution needed.",
-            exit_code=0,
-        )
-
-    if ext == ".json":
+    if ext in (".css", ".scss", ".less", ".json", ".md", ".txt"):
         try:
-            import json
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return RunResult(stdout=f"Valid JSON: {path.name}\n{json.dumps(data, indent=2)[:2000]}", exit_code=0)
+            content = path.read_text(encoding="utf-8")
+            return RunResult(
+                stdout=f"{filename}\n\n{content[:2000]}" if content else f"{filename} is empty",
+                exit_code=0,
+            )
         except Exception as e:
-            return RunResult(stderr=f"Invalid JSON: {e}", exit_code=1)
-
-    if ext in (".md", ".txt"):
-        return RunResult(stdout=f"{path.name} is a text file — no execution needed.", exit_code=0)
+            return RunResult(stderr=f"Error reading file: {e}", exit_code=1)
 
     if ext in (".jsx", ".tsx") and workspace_path and is_vite_project(workspace_path):
         return _run_vite_project(workspace_path)
-
-    if ext == ".json" and path.name == "package.json":
-        return _run_npm_command("start", workspace_path or str(path.parent))
 
     runner = detect_runner(file_path)
     if not runner:
         return RunResult(stderr=f"No runner configured for {ext} files", exit_code=1)
 
     if "compile" in runner:
-        return _run_compiled(path, runner, cwd)
+        return _run_compiled(path, runner, cwd, original_path)
 
     command = runner["command"]
     quoted_path = quote_path(str(path))
@@ -394,7 +450,7 @@ def run_file(file_path: str, workspace_path: Optional[str] = None) -> RunResult:
             cmd, shell=True, capture_output=True, text=True,
             timeout=30, cwd=cwd,
         )
-        problems = parse_problems(result.stderr, file_path)
+        problems = parse_problems(result.stderr, filename)
         return RunResult(
             stdout=result.stdout,
             stderr=result.stderr,
@@ -410,73 +466,98 @@ def run_file(file_path: str, workspace_path: Optional[str] = None) -> RunResult:
         )
 
 
-def _run_compiled(path: Path, runner: dict, cwd: str) -> RunResult:
+def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[str] = None) -> RunResult:
     compiler = runner["compile"]
-    output_name = path.stem + (".exe" if IS_WINDOWS else "")
-    output_path = path.parent / output_name
-
-    for ext in (".class", ".o", ".obj"):
-        stale = path.parent / (path.stem + ext)
-        if stale.exists():
-            try:
-                stale.unlink()
-                logger.info(f"Pre-compile cleanup: {stale}")
-            except Exception:
-                pass
+    output_dir = tempfile.mkdtemp()
+    output_name = path.stem
+    output_path = Path(output_dir) / (output_name + (".exe" if IS_WINDOWS else ""))
 
     quoted_path = quote_path(str(path))
     quoted_output = quote_path(str(output_path))
 
     if runner.get("lang") == "java":
+        try:
+            shutil.rmtree(output_dir)
+        except:
+            pass
         compile_cmd = f"{compiler} {quoted_path}"
-    else:
-        compile_cmd = f"{compiler} {quoted_path} {runner.get('run_flag', '-o')} {quoted_output}"
-
-    try:
-        compile_result = subprocess.run(
-            compile_cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=cwd,
-        )
-        if compile_result.returncode != 0:
-            problems = parse_problems(compile_result.stderr, str(path))
+        try:
+            compile_result = subprocess.run(
+                compile_cmd, shell=True, capture_output=True, text=True,
+                timeout=30, cwd=cwd,
+            )
+            if compile_result.returncode != 0:
+                problems = parse_problems(compile_result.stderr, original_path or str(path))
+                return RunResult(
+                    stderr=compile_result.stderr,
+                    exit_code=compile_result.returncode,
+                    problems=[p.model_dump() for p in problems],
+                )
+            run_cmd = f"java {path.stem}"
+            run_result = subprocess.run(
+                run_cmd, shell=True, capture_output=True, text=True,
+                timeout=30, cwd=cwd,
+            )
+            problems = parse_problems(run_result.stderr, original_path or str(path))
             return RunResult(
-                stderr=compile_result.stderr,
-                exit_code=compile_result.returncode,
+                stdout=run_result.stdout,
+                stderr=run_result.stderr,
+                exit_code=run_result.returncode,
                 problems=[p.model_dump() for p in problems],
             )
-    except subprocess.TimeoutExpired:
-        return RunResult(stderr="Compilation timed out", exit_code=124)
-    except FileNotFoundError:
-        return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
-
-    if runner.get("lang") == "java":
-        run_cmd = f"{runner.get('run', 'java')} {quote_path(path.stem)}"
+        except subprocess.TimeoutExpired:
+            return RunResult(stderr="Compilation timed out", exit_code=124)
+        except FileNotFoundError:
+            return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
+        finally:
+            try:
+                class_files = list(Path(cwd).glob(f"{path.stem}*.class"))
+                for f in class_files:
+                    try:
+                        f.unlink()
+                    except:
+                        pass
+            except:
+                pass
     else:
-        run_cmd = quote_path(str(output_path))
+        compile_cmd = f"{compiler} {quoted_path} {runner.get('run_flag', '-o')} {quoted_output}"
+        try:
+            compile_result = subprocess.run(
+                compile_cmd, shell=True, capture_output=True, text=True,
+                timeout=30, cwd=cwd,
+            )
+            if compile_result.returncode != 0:
+                problems = parse_problems(compile_result.stderr, original_path or str(path))
+                return RunResult(
+                    stderr=compile_result.stderr,
+                    exit_code=compile_result.returncode,
+                    problems=[p.model_dump() for p in problems],
+                )
+        except subprocess.TimeoutExpired:
+            return RunResult(stderr="Compilation timed out", exit_code=124)
+        except FileNotFoundError:
+            return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
+        finally:
+            try:
+                shutil.rmtree(output_dir)
+            except:
+                pass
 
-    try:
-        run_result = subprocess.run(
-            run_cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=cwd,
-        )
-        problems = parse_problems(run_result.stderr, str(path))
-        return RunResult(
-            stdout=run_result.stdout,
-            stderr=run_result.stderr,
-            exit_code=run_result.returncode,
-            problems=[p.model_dump() for p in problems],
-        )
-    except subprocess.TimeoutExpired:
-        return RunResult(stderr="Execution timed out", exit_code=124)
-    finally:
-        for ext in (".class", ".o", ".obj", ".exe"):
-            artifact = path.parent / (path.stem + ext)
-            if artifact.exists():
-                try:
-                    artifact.unlink()
-                    logger.info(f"Post-run cleanup: {artifact}")
-                except Exception:
-                    pass
+        run_cmd = quote_path(str(output_path))
+        try:
+            run_result = subprocess.run(
+                run_cmd, shell=True, capture_output=True, text=True,
+                timeout=30, cwd=cwd,
+            )
+            problems = parse_problems(run_result.stderr, original_path or str(path))
+            return RunResult(
+                stdout=run_result.stdout,
+                stderr=run_result.stderr,
+                exit_code=run_result.returncode,
+                problems=[p.model_dump() for p in problems],
+            )
+        except subprocess.TimeoutExpired:
+            return RunResult(stderr="Execution timed out", exit_code=124)
 
 
 def _run_vite_project(workspace_path: str) -> RunResult:
@@ -500,7 +581,6 @@ def _run_vite_project(workspace_path: str) -> RunResult:
             bufsize=1,
         )
 
-        
         stdout_lines = []
 
         def reader():
@@ -511,7 +591,7 @@ def _run_vite_project(workspace_path: str) -> RunResult:
 
         t = threading.Thread(target=reader, daemon=True)
         t.start()
-        t.join(timeout=6)  
+        t.join(timeout=6)
 
         output = "".join(stdout_lines)
         port = 5173
@@ -552,7 +632,6 @@ def execute_terminal_command(command: str, cwd: Optional[str] = None) -> Termina
 
     stripped = command.strip()
 
-   
     if stripped.startswith("cd "):
         target = stripped[3:].strip().strip('"').strip("'")
         if target == "~":
@@ -602,12 +681,11 @@ def execute_terminal_command(command: str, cwd: Optional[str] = None) -> Termina
         try:
             process.wait(timeout=15)
         except subprocess.TimeoutExpired:
-            
             t.join(timeout=0.5)
             process.kill()
             process.wait()
             output_lines.append("[Command timed out]\n")
-        
+
         output = "".join(output_lines)
         return TerminalResult(
             stdout=output or "",

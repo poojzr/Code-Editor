@@ -1,56 +1,115 @@
 import os
 import platform
 
-SYSTEM = platform.system()
-IS_WINDOWS = SYSTEM == "Windows"
-
+IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_SHELL = "powershell.exe" if IS_WINDOWS else "/bin/bash"
 
-IGNORED_DIRS = {
-    "__pycache__", "node_modules", ".git", ".vscode", ".idea",
-    "venv", "env", ".venv", "dist", "build", ".next",
-    ".cache", ".parcel-cache", "coverage", ".mypy_cache",
-    ".pytest_cache", ".tox", "egg-info", ".sass-cache",
-    "*.egg-info",
-}
+IGNORED_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env", ".idea", ".vscode", "dist", "build", "target", ".next", ".cache", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
-IGNORED_FILES = {".DS_Store", "Thumbs.db", ".gitkeep"}
-
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+IGNORED_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 BINARY_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".webm",
-    ".zip", ".tar", ".gz", ".rar", ".7z", ".tgz",
-    ".exe", ".dll", ".so", ".dylib", ".bin",
+    ".pyc", ".pyo", ".class", ".o", ".obj", ".exe", ".dll", ".so", ".dylib",
+    ".zip", ".tar", ".gz", ".rar", ".7z", ".jpg", ".jpeg", ".png", ".gif",
+    ".bmp", ".ico", ".svg", ".mp3", ".mp4", ".avi", ".mov", ".wmv", ".flv",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".pyc", ".pyo", ".class", ".o", ".obj", ".wasm",
-    ".woff", ".woff2", ".ttf", ".eot", ".otf",
-    ".sqlite", ".db", ".mdb",
 }
 
+MAX_FILE_SIZE = 1024 * 1024
+
 LANGUAGE_RUNNERS = {
-    "python": {"command": "python3" if not IS_WINDOWS else "python", "ext": [".py"]},
-    "javascript": {"command": "node", "ext": [".js", ".mjs", ".cjs"]},
-    "typescript": {"command": "npx tsx", "ext": [".ts"]},
-    "java": {"compile": "javac", "run": "java", "ext": [".java"]},
-    "c": {"compile": "gcc", "run_flag": "-o", "ext": [".c"]},
-    "cpp": {"compile": "g++", "run_flag": "-o", "ext": [".cpp", ".cc", ".cxx"]},
-    "csharp": {"command": "dotnet script", "ext": [".cs"]},
-    "go": {"command": "go run", "ext": [".go"]},
-    "rust": {"command": "rustc", "ext": [".rs"]},
-    "ruby": {"command": "ruby", "ext": [".rb"]},
-    "php": {"command": "php", "ext": [".php"]},
-    "kotlin": {"command": "kotlinc -script", "ext": [".kt", ".kts"]},
-    "swift": {"command": "swift", "ext": [".swift"]},
-    "dart": {"command": "dart run", "ext": [".dart"]},
-    "lua": {"command": "lua", "ext": [".lua"]},
-    "perl": {"command": "perl", "ext": [".pl"]},
-    "r": {"command": "Rscript", "ext": [".r", ".R"]},
-    "scala": {"command": "scala", "ext": [".scala"]},
-    "groovy": {"command": "groovy", "ext": [".groovy"]},
-    "julia": {"command": "julia", "ext": [".jl"]},
-    "haskell": {"command": "runhaskell", "ext": [".hs"]},
-    "shell": {"command": DEFAULT_SHELL if not IS_WINDOWS else "powershell -Command", "ext": [".sh", ".bash", ".zsh"]},
-    "powershell": {"command": "powershell -File", "ext": [".ps1"]},
+    "python": {
+        "ext": [".py"],
+        "command": "python3",
+        "run": "python3",
+    },
+    "java": {
+        "ext": [".java"],
+        "compile": "javac",
+        "run": "java",
+        "run_flag": "",
+    },
+    "javascript": {
+        "ext": [".js", ".jsx", ".mjs", ".cjs"],
+        "command": "node",
+    },
+    "typescript": {
+        "ext": [".ts", ".tsx"],
+        "command": "tsx",
+    },
+    "c": {
+        "ext": [".c"],
+        "compile": "gcc",
+        "run_flag": "-o",
+    },
+    "cpp": {
+        "ext": [".cpp", ".cc", ".cxx"],
+        "compile": "g++",
+        "run_flag": "-o",
+    },
+    "go": {
+        "ext": [".go"],
+        "command": "go run",
+    },
+    "rust": {
+        "ext": [".rs"],
+        "compile": "rustc",
+        "run_flag": "-o",
+    },
+    "ruby": {
+        "ext": [".rb"],
+        "command": "ruby",
+    },
+    "php": {
+        "ext": [".php"],
+        "command": "php",
+    },
+    "lua": {
+        "ext": [".lua"],
+        "command": "lua",
+    },
+    "perl": {
+        "ext": [".pl"],
+        "command": "perl",
+    },
+    "r": {
+        "ext": [".r"],
+        "command": "Rscript",
+    },
+    "kotlin": {
+        "ext": [".kt", ".kts"],
+        "command": "kotlinc -script",
+    },
+    "dart": {
+        "ext": [".dart"],
+        "command": "dart",
+    },
+    "swift": {
+        "ext": [".swift"],
+        "command": "swift",
+    },
+    "scala": {
+        "ext": [".scala"],
+        "command": "scala",
+    },
+    "groovy": {
+        "ext": [".groovy"],
+        "command": "groovy",
+    },
+    "julia": {
+        "ext": [".jl"],
+        "command": "julia",
+    },
+    "haskell": {
+        "ext": [".hs"],
+        "command": "runhaskell",
+    },
+    "shell": {
+        "ext": [".sh", ".bash", ".zsh"],
+        "command": "bash",
+    },
+    "powershell": {
+        "ext": [".ps1"],
+        "command": "pwsh",
+    },
 }
