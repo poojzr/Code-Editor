@@ -103,10 +103,14 @@ export async function searchFiles(workspacePath, query) {
   });
 }
 
-export async function runFile(filePath, workspacePath) {
+export async function runFile(filePath, workspacePath, fileContent) {
   return request("/workspace/run", {
     method: "POST",
-    body: JSON.stringify({ file_path: filePath, workspace_path: workspacePath || null }),
+    body: JSON.stringify({ 
+      file_path: filePath, 
+      workspace_path: workspacePath || null,
+      content: fileContent
+    }),
   });
 }
 

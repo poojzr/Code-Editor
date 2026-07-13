@@ -19,10 +19,21 @@ export default function FolderPicker({ onSelect, onClose }) {
       
       const entries = [];
       for await (const [name, handle] of dirHandle.entries()) {
+        let isDirectory = false;
+        try {
+          await handle.getDirectoryHandle(name, { create: false });
+          isDirectory = true;
+        } catch {
+          isDirectory = false;
+        }
+        if (handle.kind === 'directory') {
+          isDirectory = true;
+        }
+        
         entries.push({
           name,
           path: name,
-          type: handle.kind === 'directory' ? 'directory' : 'file',
+          type: isDirectory ? 'directory' : 'file',
           handle: handle
         });
       }

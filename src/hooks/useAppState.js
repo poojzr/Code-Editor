@@ -64,21 +64,38 @@ export function useAppState() {
 
   const readDirectory = async (dirHandle, path = "") => {
     const entries = [];
-    for await (const [name, handle] of dirHandle.entries()) {
-      const entryPath = path ? `${path}/${name}` : name;
-      entries.push({
-        name: name,
-        path: entryPath,
-        type: handle.kind === 'directory' ? 'directory' : 'file',
-        children: handle.kind === 'directory' ? [] : undefined,
-        handle: handle
-      });
+    try {
+      for await (const [name, handle] of dirHandle.entries()) {
+        const entryPath = path ? `${path}/${name}` : name;
+        let isDirectory = false;
+        try {
+          await handle.getDirectoryHandle(name, { create: false });
+          isDirectory = true;
+        } catch {
+          isDirectory = false;
+        }
+        if (handle.kind === 'directory') {
+          isDirectory = true;
+        }
+        
+        entries.push({
+          name: name,
+          path: entryPath,
+          type: isDirectory ? 'directory' : 'file',
+          children: isDirectory ? [] : undefined,
+          handle: handle
+        });
+      }
+    } catch (err) {
+      console.error("Error reading directory:", err);
     }
+    
     entries.sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1;
       if (a.type !== 'directory' && b.type === 'directory') return 1;
       return a.name.localeCompare(b.name);
     });
+    
     return entries;
   };
 
@@ -99,7 +116,7 @@ export function useAppState() {
       const entries = await readDirectory(dirHandle);
       setFileTree(entries);
       
-      setExpandedPaths(new Set());
+      setExpandedPaths(new Set([folderPath]));
       setTerminalSessions([{ id: "default", name: "bash", history: [], cwd: folderPath }]);
       setActiveTerminalId("default");
       setOutputs([]);
@@ -113,6 +130,7 @@ export function useAppState() {
         message: `Failed to open workspace: ${err.message}`, 
         timestamp: new Date().toISOString() 
       }]);
+      setFileTree([]);
     }
   }, []);
 
@@ -123,6 +141,7 @@ export function useAppState() {
       setFileTree(entries);
     } catch (err) {
       console.error("Failed to refresh:", err);
+      setFileTree([]);
     }
   }, []);
 
@@ -417,8 +436,15 @@ export function useAppState() {
     const fileName = filePath.split('/').pop();
     setProblems([]);
     setOutputs(prev => [...prev, { type: "info", message: `Running: ${fileName}`, timestamp: new Date().toISOString() }]);
+    
     try {
-      const result = await api.runFile(filePath, workspace?.path);
+      const openFile = openFiles.find(f => f.path === filePath);
+      if (!openFile) {
+        setOutputs(prev => [...prev, { type: "error", message: `File not open: ${fileName}`, timestamp: new Date().toISOString() }]);
+        return;
+      }
+      
+      const result = await api.runFile(filePath, workspace?.path, openFile.content);
       if (result.stdout) {
         setOutputs(prev => [...prev, { type: "stdout", message: result.stdout, timestamp: new Date().toISOString() }]);
       }
@@ -443,7 +469,7 @@ export function useAppState() {
       setOutputs(prev => [...prev, { type: "error", message: `Run failed: ${err.message}`, timestamp: new Date().toISOString() }]);
       setDebugLogs(prev => [...prev, { type: "error", message: `Run failed: ${err.message}`, timestamp: new Date().toISOString() }]);
     }
-  }, [workspace]);
+  }, [workspace, openFiles]);
 
   const startDebug = useCallback(async (filePath) => {
     setIsDebugging(true);
