@@ -37,6 +37,261 @@ const stripRoot = (path, rootName) => {
   return path;
 };
 
+
+const getMimeType = (ext) => {
+  const types = {
+    svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon',
+    bmp: 'image/bmp', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+    otf: 'font/otf', eot: 'application/vnd.ms-fontobject', mp4: 'video/mp4',
+    webm: 'video/webm', ogv: 'video/ogg', mp3: 'audio/mpeg', wav: 'audio/wav',
+    m4a: 'audio/mp4', flac: 'audio/flac', oga: 'audio/ogg', pdf: 'application/pdf',
+  };
+  return types[ext] || 'application/octet-stream';
+};
+
+const readFileByPath = async (dirHandle, relativePath) => {
+  const parts = relativePath.split('/').filter(Boolean);
+  const fileName = parts.pop();
+  let currentHandle = dirHandle;
+  for (const part of parts) {
+    currentHandle = await currentHandle.getDirectoryHandle(part);
+  }
+  const fileHandle = await currentHandle.getFileHandle(fileName);
+  const file = await fileHandle.getFile();
+  return await file.text();
+};
+
+const readFileAsDataURL = async (dirHandle, relativePath) => {
+  const parts = relativePath.split('/').filter(Boolean);
+  const fileName = parts.pop();
+  const ext = fileName.split('.').pop().toLowerCase();
+  let currentHandle = dirHandle;
+  for (const part of parts) {
+    currentHandle = await currentHandle.getDirectoryHandle(part);
+  }
+  const fileHandle = await currentHandle.getFileHandle(fileName);
+  const file = await fileHandle.getFile();
+
+  
+  if (ext === 'svg') {
+    const text = await file.text();
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(text)))}`;
+  }
+
+  
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let result = reader.result;
+      if (result.startsWith('data:;') || result.startsWith('data:application/octet-stream;')) {
+        const mime = getMimeType(ext);
+        const base64Data = result.split(',')[1] || '';
+        result = `data:${mime};base64,${base64Data}`;
+      }
+      resolve(result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+const isExternalRef = (ref) =>
+  /^(https?:)?\/\//.test(ref) || ref.startsWith('data:') || ref.startsWith('/') || ref.startsWith('#');
+
+const resolveRelativePath = (ref, baseDir) => {
+  let basePath = baseDir ? baseDir.split('/').filter(Boolean) : [];
+  for (const part of ref.split('/')) {
+    if (part === '..') basePath.pop();
+    else if (part === '.' || part === '') continue;
+    else basePath.push(part);
+  }
+  return basePath.join('/');
+};
+
+
+const inlineCssUrls = async (dirHandle, cssContent, cssFilePath) => {
+  const cssDir = cssFilePath.includes('/')
+    ? cssFilePath.substring(0, cssFilePath.lastIndexOf('/'))
+    : '';
+  const urlRegex = /url\s*\(\s*['"]?([^'")]+)['"]?\s*\)/gi;
+  const urlsToInline = [];
+  let match;
+  while ((match = urlRegex.exec(cssContent)) !== null) {
+    const url = match[1];
+    if (isExternalRef(url)) continue;
+    urlsToInline.push({ fullMatch: match[0], url });
+  }
+  for (const { fullMatch, url } of urlsToInline) {
+    try {
+      const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(url, cssDir));
+      cssContent = cssContent.replace(fullMatch, `url("${dataUrl}")`);
+    } catch (e) {}
+  }
+  return cssContent;
+};
+
+const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
+  const baseDir = htmlFilePath.includes('/')
+    ? htmlFilePath.substring(0, htmlFilePath.lastIndexOf('/'))
+    : '';
+
+  
+  const cssLinkRegex = /<link\b[^>]*>/gi;
+  let match;
+  const cssToInline = [];
+  while ((match = cssLinkRegex.exec(htmlContent)) !== null) {
+    const tag = match[0];
+    if (!/rel\s*=\s*["']\s*stylesheet\s*["']/i.test(tag)) continue;
+    const hrefMatch = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+    if (!hrefMatch) continue;
+    const href = hrefMatch[1];
+    if (isExternalRef(href)) continue;
+    cssToInline.push({ tag, href });
+  }
+  for (const { tag, href } of cssToInline) {
+    try {
+      const cssPath = resolveRelativePath(href, baseDir);
+      let cssContent = await readFileByPath(dirHandle, cssPath);
+      cssContent = await inlineCssUrls(dirHandle, cssContent, cssPath);
+      htmlContent = htmlContent.replace(tag, `<style>\n${cssContent}\n</style>`);
+    } catch (e) {}
+  }
+
+  
+  const inlineStyleRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  const stylesToProcess = [];
+  while ((match = inlineStyleRegex.exec(htmlContent)) !== null) {
+    stylesToProcess.push({ fullMatch: match[0], css: match[1] });
+  }
+  for (const { fullMatch, css } of stylesToProcess) {
+    try {
+      const processed = await inlineCssUrls(dirHandle, css, htmlFilePath);
+      htmlContent = htmlContent.replace(fullMatch, `<style>${processed}</style>`);
+    } catch (e) {}
+  }
+
+  
+  const jsScriptRegex = /<script\b([^>]*)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi;
+  const jsToInline = [];
+  while ((match = jsScriptRegex.exec(htmlContent)) !== null) {
+    const attrs1 = (match[1] || '').trim();
+    const src = match[2];
+    const attrs2 = (match[3] || '').trim();
+    if (isExternalRef(src)) continue;
+    const attrs = [attrs1, attrs2].filter(Boolean).join(' ');
+    jsToInline.push({ fullMatch: match[0], attrs, src });
+  }
+  for (const { fullMatch, attrs, src } of jsToInline) {
+    try {
+      const jsContent = await readFileByPath(dirHandle, resolveRelativePath(src, baseDir));
+      const attrStr = attrs ? ' ' + attrs : '';
+      htmlContent = htmlContent.replace(fullMatch, `<script${attrStr}>\n${jsContent}\n</script>`);
+    } catch (e) {}
+  }
+
+  
+  const imgsToInline = [];
+  while ((match = imgRegex.exec(htmlContent)) !== null) {
+    imgsToInline.push(match[0]);
+  }
+  for (const tag of imgsToInline) {
+    let newTag = tag;
+    
+    const srcMatch = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (srcMatch && !isExternalRef(srcMatch[1])) {
+      try {
+        const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(srcMatch[1], baseDir));
+        newTag = newTag.replace(srcMatch[0], `src="${dataUrl}"`);
+      } catch (e) {}
+    }
+    
+    const srcsetMatch = tag.match(/srcset\s*=\s*["']([^"']+)["']/i);
+    if (srcsetMatch && !isExternalRef(srcsetMatch[1])) {
+      try {
+        const parts = srcsetMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+        const dataParts = [];
+        for (const part of parts) {
+          const [url, descriptor] = part.split(/\s+/);
+          if (!isExternalRef(url)) {
+            try {
+              const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(url, baseDir));
+              dataParts.push(descriptor ? `${dataUrl} ${descriptor}` : dataUrl);
+            } catch (e) {
+              dataParts.push(part);
+            }
+          } else {
+            dataParts.push(part);
+          }
+        }
+        newTag = newTag.replace(srcsetMatch[0], `srcset="${dataParts.join(', ')}"`);
+      } catch (e) {}
+    }
+    htmlContent = htmlContent.replace(tag, newTag);
+  }
+
+  
+  const sourceRegex = /<source\b[^>]*>/gi;
+  const sourcesToInline = [];
+  while ((match = sourceRegex.exec(htmlContent)) !== null) {
+    sourcesToInline.push(match[0]);
+  }
+  for (const tag of sourcesToInline) {
+    let newTag = tag;
+    
+    const srcsetMatch = tag.match(/srcset\s*=\s*["']([^"']+)["']/i);
+    if (srcsetMatch && !isExternalRef(srcsetMatch[1])) {
+      try {
+        const parts = srcsetMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+        const dataParts = [];
+        for (const part of parts) {
+          const [url, descriptor] = part.split(/\s+/);
+          if (!isExternalRef(url)) {
+            try {
+              const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(url, baseDir));
+              dataParts.push(descriptor ? `${dataUrl} ${descriptor}` : dataUrl);
+            } catch (e) {
+              dataParts.push(part);
+            }
+          } else {
+            dataParts.push(part);
+          }
+        }
+        newTag = newTag.replace(srcsetMatch[0], `srcset="${dataParts.join(', ')}"`);
+      } catch (e) {}
+    }
+    
+    const srcMatch = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (srcMatch && !isExternalRef(srcMatch[1])) {
+      try {
+        const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(srcMatch[1], baseDir));
+        newTag = newTag.replace(srcMatch[0], `src="${dataUrl}"`);
+      } catch (e) {}
+    }
+    htmlContent = htmlContent.replace(tag, newTag);
+  }
+
+  
+  const mediaRegex = /<(?:video|audio)\b[^>]*>/gi;
+  const mediaToInline = [];
+  while ((match = mediaRegex.exec(htmlContent)) !== null) {
+    mediaToInline.push(match[0]);
+  }
+  for (const tag of mediaToInline) {
+    const srcMatch = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (srcMatch && !isExternalRef(srcMatch[1])) {
+      try {
+        const dataUrl = await readFileAsDataURL(dirHandle, resolveRelativePath(srcMatch[1], baseDir));
+        const newTag = tag.replace(srcMatch[0], `src="${dataUrl}"`);
+        htmlContent = htmlContent.replace(tag, newTag);
+      } catch (e) {}
+    }
+  }
+
+  return htmlContent;
+};
+
+
 export function useAppState() {
   const [workspace, setWorkspace] = useState(null);
   const [fileTree, setFileTree] = useState([]);
@@ -496,15 +751,37 @@ export function useAppState() {
     const fileName = filePath.split('/').pop();
     setProblems([]);
     setOutputs(prev => [...prev, { type: "info", message: `Running: ${fileName}`, timestamp: new Date().toISOString() }]);
-    try {
-      const fileEntry = openFiles.find(f => f.path === filePath);
-      if (!fileEntry) {
-        setOutputs(prev => [...prev, { type: "error", message: `File not open: ${fileName}`, timestamp: new Date().toISOString() }]);
-        return;
+
+    const fileEntry = openFiles.find(f => f.path === filePath);
+    if (!fileEntry) {
+      setOutputs(prev => [...prev, { type: "error", message: `File not open: ${fileName}`, timestamp: new Date().toISOString() }]);
+      return;
+    }
+
+    const ext = filePath.split('.').pop().toLowerCase();
+    if (ext === 'html' || ext === 'htm') {
+      try {
+        let inlinedHtml = fileEntry.content;
+        try {
+          const dirHandle = getDirHandle();
+          inlinedHtml = await inlineHtmlAssets(dirHandle, fileEntry.content, filePath);
+        } catch (e) {
+         
+        }
+        setPreview(inlinedHtml);
+        setPreviewType("html");
+        setActiveBottomTab("preview");
+        setBottomPanelVisible(true);
+        setOutputs(prev => [...prev, { type: "info", message: `Preview ready: ${fileName}`, timestamp: new Date().toISOString() }]);
+      } catch (err) {
+        setOutputs(prev => [...prev, { type: "error", message: `Preview failed: ${err.message}`, timestamp: new Date().toISOString() }]);
       }
+      return;
+    }
+    
+    try {
       const result = await api.runFile(filePath, workspace?.path, fileEntry.content);
 
-      
       if (result.preview) {
         setPreview(result.preview);
         setPreviewType(result.preview_type);
@@ -540,7 +817,6 @@ export function useAppState() {
     }
   }, [workspace, openFiles]);
 
-  
   const clearPreview = useCallback(() => {
     setPreview(null);
     setPreviewType(null);
