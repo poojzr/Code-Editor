@@ -1,6 +1,5 @@
 import React, { useMemo, useEffect } from "react";
-import { X, ExternalLink, RefreshCw } from "lucide-react";
-
+import { X, ExternalLink } from "lucide-react";
 
 export default function PreviewPanel({ preview, previewType, onClose }) {
   const blobUrl = useMemo(() => {
@@ -9,7 +8,6 @@ export default function PreviewPanel({ preview, previewType, onClose }) {
     return URL.createObjectURL(blob);
   }, [preview, previewType]);
 
-  
   useEffect(() => {
     return () => {
       if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -55,7 +53,7 @@ export default function PreviewPanel({ preview, previewType, onClose }) {
         src={blobUrl}
         className="flex-1 w-full border-0 bg-white"
         title="HTML Preview"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        sandbox="allow-scripts allow-forms allow-popups"
       />
     </div>
   );

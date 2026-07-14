@@ -37,7 +37,6 @@ const stripRoot = (path, rootName) => {
   return path;
 };
 
-
 const getMimeType = (ext) => {
   const types = {
     svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -73,13 +72,11 @@ const readFileAsDataURL = async (dirHandle, relativePath) => {
   const fileHandle = await currentHandle.getFileHandle(fileName);
   const file = await fileHandle.getFile();
 
-  
   if (ext === 'svg') {
     const text = await file.text();
     return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(text)))}`;
   }
 
-  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -109,7 +106,6 @@ const resolveRelativePath = (ref, baseDir) => {
   return basePath.join('/');
 };
 
-
 const inlineCssUrls = async (dirHandle, cssContent, cssFilePath) => {
   const cssDir = cssFilePath.includes('/')
     ? cssFilePath.substring(0, cssFilePath.lastIndexOf('/'))
@@ -136,7 +132,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     ? htmlFilePath.substring(0, htmlFilePath.lastIndexOf('/'))
     : '';
 
-  
   const cssLinkRegex = /<link\b[^>]*>/gi;
   let match;
   const cssToInline = [];
@@ -158,7 +153,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     } catch (e) {}
   }
 
-  
   const inlineStyleRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
   const stylesToProcess = [];
   while ((match = inlineStyleRegex.exec(htmlContent)) !== null) {
@@ -171,7 +165,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     } catch (e) {}
   }
 
-  
   const jsScriptRegex = /<script\b([^>]*)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi;
   const jsToInline = [];
   while ((match = jsScriptRegex.exec(htmlContent)) !== null) {
@@ -190,14 +183,13 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     } catch (e) {}
   }
 
-  
+  const imgRegex = /<img\b[^>]*>/gi;
   const imgsToInline = [];
   while ((match = imgRegex.exec(htmlContent)) !== null) {
     imgsToInline.push(match[0]);
   }
   for (const tag of imgsToInline) {
     let newTag = tag;
-    
     const srcMatch = tag.match(/src\s*=\s*["']([^"']+)["']/i);
     if (srcMatch && !isExternalRef(srcMatch[1])) {
       try {
@@ -205,7 +197,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
         newTag = newTag.replace(srcMatch[0], `src="${dataUrl}"`);
       } catch (e) {}
     }
-    
     const srcsetMatch = tag.match(/srcset\s*=\s*["']([^"']+)["']/i);
     if (srcsetMatch && !isExternalRef(srcsetMatch[1])) {
       try {
@@ -230,7 +221,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     htmlContent = htmlContent.replace(tag, newTag);
   }
 
-  
   const sourceRegex = /<source\b[^>]*>/gi;
   const sourcesToInline = [];
   while ((match = sourceRegex.exec(htmlContent)) !== null) {
@@ -238,7 +228,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
   }
   for (const tag of sourcesToInline) {
     let newTag = tag;
-    
     const srcsetMatch = tag.match(/srcset\s*=\s*["']([^"']+)["']/i);
     if (srcsetMatch && !isExternalRef(srcsetMatch[1])) {
       try {
@@ -260,7 +249,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
         newTag = newTag.replace(srcsetMatch[0], `srcset="${dataParts.join(', ')}"`);
       } catch (e) {}
     }
-    
     const srcMatch = tag.match(/src\s*=\s*["']([^"']+)["']/i);
     if (srcMatch && !isExternalRef(srcMatch[1])) {
       try {
@@ -271,7 +259,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
     htmlContent = htmlContent.replace(tag, newTag);
   }
 
-  
   const mediaRegex = /<(?:video|audio)\b[^>]*>/gi;
   const mediaToInline = [];
   while ((match = mediaRegex.exec(htmlContent)) !== null) {
@@ -290,7 +277,6 @@ const inlineHtmlAssets = async (dirHandle, htmlContent, htmlFilePath) => {
 
   return htmlContent;
 };
-
 
 export function useAppState() {
   const [workspace, setWorkspace] = useState(null);
@@ -761,13 +747,8 @@ export function useAppState() {
     const ext = filePath.split('.').pop().toLowerCase();
     if (ext === 'html' || ext === 'htm') {
       try {
-        let inlinedHtml = fileEntry.content;
-        try {
-          const dirHandle = getDirHandle();
-          inlinedHtml = await inlineHtmlAssets(dirHandle, fileEntry.content, filePath);
-        } catch (e) {
-         
-        }
+        const dirHandle = getDirHandle();
+        const inlinedHtml = await inlineHtmlAssets(dirHandle, fileEntry.content, filePath);
         setPreview(inlinedHtml);
         setPreviewType("html");
         setActiveBottomTab("preview");
@@ -778,7 +759,7 @@ export function useAppState() {
       }
       return;
     }
-    
+
     try {
       const result = await api.runFile(filePath, workspace?.path, fileEntry.content);
 
