@@ -22,6 +22,21 @@ from models import (
 logger = logging.getLogger(__name__)
 
 
+def get_python_command() -> str:
+    
+    for cmd in ["python3", "python"]:
+        try:
+            result = subprocess.run(
+                f"{cmd} --version", shell=True,
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return cmd
+        except Exception:
+            continue
+    return "python"
+
+
 def get_language_from_extension(filename: str) -> str:
     ext = Path(filename).suffix.lower()
     lang_map = {
@@ -344,16 +359,20 @@ def is_vite_project(workspace_path: str) -> bool:
 
 def run_file(file_path: str, workspace_path: Optional[str] = None, content: Optional[str] = None) -> RunResult:
     if content is not None:
+        
         suffix = Path(file_path).suffix.lower()
-        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
-            f.write(content)
-            temp_path = f.name
+        filename = Path(file_path).name
+        temp_dir = tempfile.mkdtemp(prefix="codeeditor_")
+        temp_path = os.path.join(temp_dir, filename)
         try:
-            return _run_file_from_path(temp_path, workspace_path, file_path)
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            return _run_file_from_path(temp_path, temp_dir, file_path)
         finally:
             try:
-                os.unlink(temp_path)
-            except:
+                shutil.rmtree(temp_dir)
+            except Exception:
                 pass
     else:
         path = Path(file_path)
@@ -364,7 +383,11 @@ def run_file(file_path: str, workspace_path: Optional[str] = None, content: Opti
 
 def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, original_path: Optional[str] = None) -> RunResult:
     path = Path(file_path)
-    cwd = workspace_path or str(path.parent)
+    # Only use workspace_path as cwd if it actually exists on this server
+    if workspace_path and os.path.isdir(workspace_path):
+        cwd = workspace_path
+    else:
+        cwd = str(path.parent)
     ext = path.suffix.lower()
     filename = original_path or str(path)
 
@@ -384,7 +407,7 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
         except Exception as e:
             return RunResult(stderr=f"Error reading file: {e}", exit_code=1)
 
-    if ext in (".jsx", ".tsx") and workspace_path and is_vite_project(workspace_path):
+    if ext in (".jsx", ".tsx") and workspace_path and os.path.isdir(workspace_path) and is_vite_project(workspace_path):
         return _run_vite_project(workspace_path)
 
     runner = detect_runner(file_path)
@@ -396,9 +419,10 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
 
     command = runner["command"]
     quoted_path = quote_path(str(path))
-    
+
     if runner.get("lang") == "python":
-        cmd = f"python3 {quoted_path}"
+        python_cmd = get_python_command()
+        cmd = f"{python_cmd} {quoted_path}"
     else:
         cmd = f"{command} {quoted_path}"
 
@@ -426,7 +450,7 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
 
 def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[str] = None) -> RunResult:
     compiler = runner["compile"]
-    output_dir = tempfile.mkdtemp()
+    output_dir = tempfile.mkdtemp(prefix="codeeditor_compile_")
     output_name = path.stem
     output_path = Path(output_dir) / (output_name + (".exe" if IS_WINDOWS else ""))
 
@@ -434,6 +458,7 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
     quoted_output = quote_path(str(output_path))
 
     if runner.get("lang") == "java":
+        
         compile_cmd = f"{compiler} {quoted_path}"
         try:
             compile_result = subprocess.run(
@@ -447,7 +472,8 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
                     exit_code=compile_result.returncode,
                     problems=[p.model_dump() for p in problems],
                 )
-            run_cmd = f"java {path.stem}"
+            
+            run_cmd = f"java -cp {quote_path(cwd)} {path.stem}"
             run_result = subprocess.run(
                 run_cmd, shell=True, capture_output=True, text=True,
                 timeout=30, cwd=cwd,
@@ -463,16 +489,6 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
             return RunResult(stderr="Compilation timed out", exit_code=124)
         except FileNotFoundError:
             return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
-        finally:
-            try:
-                class_files = list(Path(cwd).glob(f"{path.stem}*.class"))
-                for f in class_files:
-                    try:
-                        f.unlink()
-                    except:
-                        pass
-            except:
-                pass
     else:
         compile_cmd = f"{compiler} {quoted_path} {runner.get('run_flag', '-o')} {quoted_output}"
         try:
@@ -491,12 +507,6 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
             return RunResult(stderr="Compilation timed out", exit_code=124)
         except FileNotFoundError:
             return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
-        finally:
-            try:
-                import shutil
-                shutil.rmtree(output_dir)
-            except:
-                pass
 
         run_cmd = quote_path(str(output_path))
         try:
@@ -513,6 +523,11 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
             )
         except subprocess.TimeoutExpired:
             return RunResult(stderr="Execution timed out", exit_code=124)
+        finally:
+            try:
+                shutil.rmtree(output_dir)
+            except Exception:
+                pass
 
 
 def _run_vite_project(workspace_path: str) -> RunResult:
@@ -565,19 +580,46 @@ def _run_vite_project(workspace_path: str) -> RunResult:
         return RunResult(stderr=f"Failed to start Vite: {str(e)}", exit_code=1)
 
 
-def _run_npm_command(script: str, workspace_path: str) -> RunResult:
-    try:
-        result = subprocess.run(
-            f"npm run {script}", shell=True, capture_output=True, text=True,
-            timeout=30, cwd=workspace_path,
-        )
-        return RunResult(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
-    except subprocess.TimeoutExpired:
-        return RunResult(stderr=f"npm run {script} timed out", exit_code=124)
+FILE_EXECUTION_MESSAGE = (
+    "  This terminal runs on the server and cannot access files from your browser.\n"
+    "   Use the Run button in the toolbar to execute your code.\n"
+    "   This terminal is for server-side commands like: python --version, pip install, ls, etc."
+)
+
+
+def _is_file_execution_attempt(command: str, cwd: str) -> bool:
+    
+    parts = command.split()
+    if not parts:
+        return False
+
+    runners = ["python", "python3", "node", "javac", "ruby", "gcc", "g++",
+               "rustc", "perl", "lua", "php", "dart", "swift", "scala",
+               "groovy", "julia", "runhaskell", "Rscript", "kotlinc", "go"]
+
+    
+    if parts[0] in runners and len(parts) > 1 and not parts[1].startswith("-"):
+        filename = parts[1]
+        if "." in filename:
+            filepath = os.path.join(cwd, filename)
+            return not os.path.exists(filepath)
+
+    
+    if parts[0] == "java" and len(parts) > 1 and not parts[1].startswith("-"):
+        classname = parts[1]
+        if "." not in classname:
+            classfile = os.path.join(cwd, classname + ".class")
+            return not os.path.exists(classfile)
+        else:
+            filepath = os.path.join(cwd, classname)
+            return not os.path.exists(filepath)
+
+    
+    if len(parts) == 1 and "." in parts[0] and not parts[0].startswith("-"):
+        filepath = os.path.join(cwd, parts[0])
+        return not os.path.exists(filepath)
+
+    return False
 
 
 def execute_terminal_command(command: str, cwd: Optional[str] = None) -> TerminalResult:
@@ -614,6 +656,10 @@ def execute_terminal_command(command: str, cwd: Optional[str] = None) -> Termina
 
     if stripped == "pwd":
         return TerminalResult(stdout=work_dir + "\n", exit_code=0, cwd=work_dir)
+
+    
+    if _is_file_execution_attempt(stripped, work_dir):
+        return TerminalResult(stdout=FILE_EXECUTION_MESSAGE, exit_code=0, cwd=work_dir)
 
     try:
         process = subprocess.Popen(

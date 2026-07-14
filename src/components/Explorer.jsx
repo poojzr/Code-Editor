@@ -6,7 +6,7 @@ export default function Explorer({
   fileTree, workspace, onOpenFile, onCreateFile, onCreateFolder,
   onDelete, onRename, onCopy, onPaste, onRefresh, onCollapseAll,
   onContextMenu, onOpenFolder,
-  expandedPaths, onToggleExpand, onLoadChildren,
+  expandedPaths, onToggleExpand, onLoadChildren, loadingPaths,
 }) {
   const [editingPath, setEditingPath] = useState(null);
   const [editValue, setEditValue] = useState("");
@@ -55,15 +55,17 @@ export default function Explorer({
 
   const handleNewItemSubmit = useCallback(() => {
     if (!newItemName.trim()) { setNewItemParent(null); return; }
+    
+    const parentPath = newItemParent || "";
     if (newItemType === "file") {
-      onCreateFile(newItemParent || workspace?.path || "", newItemName.trim());
+      onCreateFile(parentPath, newItemName.trim());
     } else {
-      onCreateFolder(newItemParent || workspace?.path || "", newItemName.trim());
+      onCreateFolder(parentPath, newItemName.trim());
     }
     setNewItemParent(null);
     setNewItemType(null);
     setNewItemName("");
-  }, [newItemName, newItemType, newItemParent, onCreateFile, onCreateFolder, workspace]);
+  }, [newItemName, newItemType, newItemParent, onCreateFile, onCreateFolder]);
 
   if (!workspace) {
     return (
@@ -83,19 +85,19 @@ export default function Explorer({
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#313244]">
         <span className="text-[11px] uppercase tracking-wider text-[#888] font-semibold truncate">
-          Explorer
+          {workspace.name || "Explorer"}
         </span>
         <div className="flex items-center gap-0.5">
           <button
             title="New File"
-            onClick={() => { setNewItemParent(workspace?.path || ""); setNewItemType("file"); setNewItemName(""); }}
+            onClick={() => { setNewItemParent(""); setNewItemType("file"); setNewItemName(""); }}
             className="p-1 text-[#888] hover:text-white rounded hover:bg-[#313244] transition-colors"
           >
             <FilePlus size={14} />
           </button>
           <button
             title="New Folder"
-            onClick={() => { setNewItemParent(workspace?.path || ""); setNewItemType("folder"); setNewItemName(""); }}
+            onClick={() => { setNewItemParent(""); setNewItemType("folder"); setNewItemName(""); }}
             className="p-1 text-[#888] hover:text-white rounded hover:bg-[#313244] transition-colors"
           >
             <FolderPlus size={14} />
@@ -140,6 +142,7 @@ export default function Explorer({
           setEditValue={setEditValue}
           onEditSubmit={handleEditSubmit}
           onEditCancel={handleEditCancel}
+          loadingPaths={loadingPaths}
         />
       </div>
     </div>

@@ -3,9 +3,18 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 
 from models import (
-    WorkspaceOpenRequest, WorkspaceInfo, FileCreateRequest,
-    FolderCreateRequest, FileRenameRequest, FileCopyRequest,
-    FileMoveRequest, SearchRequest, RunRequest, TerminalRequest,
+    WorkspaceOpenRequest,
+    WorkspaceInfo,
+    FileCreateRequest,
+    FolderCreateRequest,
+    FileRenameRequest,
+    FileCopyRequest,
+    FileMoveRequest,
+    SearchRequest,
+    RunRequest,
+    TerminalRequest,
+    DirectoryContents,
+    FileNode,
 )
 import services
 
@@ -26,7 +35,6 @@ async def open_workspace(req: WorkspaceOpenRequest):
     path = Path(req.path).resolve()
     if not path.is_dir():
         raise HTTPException(status_code=400, detail=f"Directory not found: {req.path}")
-
     _current_workspace = {"path": str(path), "name": path.name}
     logger.info(f"Workspace opened: {path}")
     return WorkspaceInfo(path=str(path), name=path.name, exists=True)
@@ -35,12 +43,17 @@ async def open_workspace(req: WorkspaceOpenRequest):
 async def workspace_info():
     if not _current_workspace:
         raise HTTPException(status_code=400, detail="No workspace open")
-    return WorkspaceInfo(**_current_workspace, exists=True)
+    return WorkspaceInfo(
+        path=_current_workspace["path"],
+        name=_current_workspace["name"],
+        exists=True,
+    )
 
 @router.get("/workspace/files")
 async def get_files(path: str = Query(...)):
     try:
-        return services.list_directory(path)
+        nodes = services.list_directory(path)
+        return DirectoryContents(path=path, entries=nodes)
     except (FileNotFoundError, NotADirectoryError) as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -116,9 +129,16 @@ async def terminal(req: TerminalRequest):
 async def get_problems():
     return []
 
-@router.get("/workspace/browse")
+@router.get("/workspace/directories")
 async def browse_directory(path: str = Query(default=None)):
-    return {"path": "", "entries": []}
+    directory = path or (_current_workspace["path"] if _current_workspace else None)
+    if not directory:
+        raise HTTPException(status_code=400, detail="No workspace open")
+    try:
+        nodes = services.list_directory(directory)
+        return DirectoryContents(path=directory, entries=nodes)
+    except (FileNotFoundError, NotADirectoryError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @router.get("/workspace/ports")
 async def get_ports():

@@ -20,8 +20,7 @@ MAX_FILE_SIZE = 1024 * 1024
 LANGUAGE_RUNNERS = {
     "python": {
         "ext": [".py"],
-        "command": "python3",
-        "run": "python3",
+        "command": "python",
     },
     "java": {
         "ext": [".java"],

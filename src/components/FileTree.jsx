@@ -41,8 +41,9 @@ function TreeNode({
   const isExpanded = expandedPaths.has(node.path);
   const isEditing = editingPath === node.path;
   const isLoading = loadingPaths.has(node.path);
-  const hasChildren = node.children && node.children.length > 0;
-  
+  const childrenLoaded = node.children !== null && node.children !== undefined;
+  const hasChildren = childrenLoaded && node.children.length > 0;
+
   const IconComponent = isDir
     ? (isExpanded ? FolderOpen : Folder)
     : getFileIcon(node.name, false);
@@ -50,8 +51,7 @@ function TreeNode({
   const handleClick = () => {
     if (isEditing) return;
     if (isDir) {
-      
-      if (!isExpanded && !node.children && !isLoading) {
+      if (!isExpanded && !childrenLoaded && !isLoading) {
         onLoadChildren?.(node.path);
       }
       onToggleExpand(node.path);
@@ -132,7 +132,7 @@ function TreeNode({
               ))}
             </div>
           )}
-          {!isLoading && !hasChildren && node.children !== undefined && (
+          {!isLoading && childrenLoaded && !hasChildren && (
             <div style={{ paddingLeft: `${(depth + 1) * 16 + 20}px` }} className="text-[11px] text-[#666] py-0.5 italic">
               Empty folder
             </div>

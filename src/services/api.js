@@ -11,7 +11,11 @@ async function request(path, options = {}) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     let message = err.detail || `Request failed: ${res.status}`;
     if (Array.isArray(message)) {
-      message = message.map(e => e.msg ? `${e.loc?.join('.') || ''}: ${e.msg}` : JSON.stringify(e)).join('; ');
+      message = message
+        .map(e =>
+          e.msg ? `${e.loc?.join(".") || ""}: ${e.msg}` : JSON.stringify(e)
+        )
+        .join("; ");
     }
     throw new Error(message);
   }
@@ -23,11 +27,10 @@ export async function healthCheck() {
 }
 
 export async function openWorkspace(path) {
-  return { 
-    path: path, 
-    name: path.split(/[/\\]/).pop() || path, 
-    exists: true 
-  };
+  return request("/workspace/open", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 }
 
 export async function getWorkspaceInfo() {
@@ -38,7 +41,8 @@ export async function getFiles(path) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    return await request(`/workspace/files?path=${encodeURIComponent(path)}`, { signal: controller.signal });
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return await request(`/workspace/files${query}`, { signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
@@ -106,10 +110,10 @@ export async function searchFiles(workspacePath, query) {
 export async function runFile(filePath, workspacePath, fileContent) {
   return request("/workspace/run", {
     method: "POST",
-    body: JSON.stringify({ 
-      file_path: filePath, 
+    body: JSON.stringify({
+      file_path: filePath,
       workspace_path: workspacePath || null,
-      content: fileContent
+      content: fileContent,
     }),
   });
 }
@@ -130,5 +134,6 @@ export async function getPorts() {
 }
 
 export async function browseDirectories(path) {
-  return { path: path || '', entries: [] };
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  return request(`/workspace/directories${query}`);
 }

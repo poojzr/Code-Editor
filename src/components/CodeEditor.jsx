@@ -1,37 +1,45 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
 
 export default function CodeEditor({ file, onChange, onSave, onEditorReady }) {
   const editorRef = useRef(null);
-  const [content, setContent] = useState(file?.content || "");
-  const timeoutRef = useRef(null);
+  const monacoRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+  const onEditorReadyRef = useRef(onEditorReady);
+
+  
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
-    if (file) {
-      setContent(file.content);
-    }
-  }, [file]);
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  useEffect(() => {
+    onEditorReadyRef.current = onEditorReady;
+  }, [onEditorReady]);
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
-    
+    monacoRef.current = monaco;
+
     editor.onDidChangeModelContent(() => {
       const value = editor.getValue();
-      setContent(value);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+      if (onChangeRef.current) {
+        onChangeRef.current(value);
       }
-      timeoutRef.current = setTimeout(() => {
-        onChange(value);
-      }, 300);
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      onSave();
+      if (onSaveRef.current) {
+        onSaveRef.current();
+      }
     });
 
-    if (onEditorReady) {
-      onEditorReady(editor, monaco);
+    if (onEditorReadyRef.current) {
+      onEditorReadyRef.current(editor, monaco);
     }
   };
 
@@ -55,11 +63,12 @@ export default function CodeEditor({ file, onChange, onSave, onEditorReady }) {
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full" key={file.id}>
       <Editor
         height="100%"
-        language={file.language || "plaintext"}
-        value={content}
+        path={file.path}
+        defaultLanguage={file.language || "plaintext"}
+        defaultValue={file.content}
         theme="custom-dark"
         onMount={handleEditorDidMount}
         beforeMount={handleWillMount}

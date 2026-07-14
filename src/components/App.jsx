@@ -20,7 +20,7 @@ export default function App() {
     bottomPanelVisible, bottomPanelHeight, activeBottomTab, problems,
     outputs, debugLogs, ports, terminalSessions, activeTerminalId,
     contextMenu, fileTree, autoSave,
-    expandedPaths, isDebugging,
+    expandedPaths, isDebugging, loadingPaths,
     setSidebarWidth, setBottomPanelHeight, setActiveBottomTab,
     setSidebarVisible, setBottomPanelVisible,
     openFile, closeFile, setActiveFile, saveFile, saveAllFiles, updateFileContent,
@@ -67,7 +67,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       const target = e.target;
-       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('.monaco-editor')) return;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('.monaco-editor')) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         if (activeFileId) saveFile(activeFileId);
@@ -144,13 +144,13 @@ export default function App() {
   const handleNewFile = useCallback(() => {
     if (!workspace) { handleOpenFolder(); return; }
     const name = prompt("New file name:");
-    if (name) createFile(workspace.path, name).then(() => openFile(`${workspace.path}/${name}`.replace(/\\/g, "/")));
+    if (name) createFile("", name).then(() => openFile(name));
   }, [workspace, createFile, openFile, handleOpenFolder]);
 
   const handleNewFolder = useCallback(() => {
     if (!workspace) { handleOpenFolder(); return; }
     const name = prompt("New folder name:");
-    if (name) createFolder(workspace.path, name);
+    if (name) createFolder("", name);
   }, [workspace, createFolder, handleOpenFolder]);
 
   const handleSplitTerminal = useCallback(() => {
@@ -231,6 +231,7 @@ export default function App() {
                 expandedPaths={expandedPaths}
                 onToggleExpand={toggleExpand}
                 onLoadChildren={loadDirectoryChildren}
+                loadingPaths={loadingPaths}
               />
             </div>
             <div

@@ -45,7 +45,7 @@ class FileNode(BaseModel):
     name: str
     path: str
     type: str
-    children: Optional[List['FileNode']] = None
+    children: Optional[List["FileNode"]] = None
 
 class FileContent(BaseModel):
     path: str
