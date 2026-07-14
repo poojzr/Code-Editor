@@ -62,6 +62,8 @@ export function useAppState() {
   const [autoSave, setAutoSave] = useState(false);
   const [clipboard, setClipboard] = useState(null);
   const [loadingPaths, setLoadingPaths] = useState(new Set());
+  const [preview, setPreview] = useState(null);
+  const [previewType, setPreviewType] = useState(null);
   const autoSaveTimerRef = useRef(null);
 
   const getDirHandle = () => {
@@ -104,8 +106,8 @@ export function useAppState() {
     try {
       const dirHandle = getDirHandle();
       const info = {
-        path: "",           
-        name: folderPath,   
+        path: "",
+        name: folderPath,
         exists: true
       };
       setWorkspace(info);
@@ -118,6 +120,8 @@ export function useAppState() {
       setProblems([]);
       setDebugLogs([]);
       setPorts([]);
+      setPreview(null);
+      setPreviewType(null);
     } catch (err) {
       console.error("Failed to open workspace:", err);
       setDebugLogs(prev => [...prev, {
@@ -303,7 +307,7 @@ export function useAppState() {
         }
       }
       await currentHandle.getFileHandle(name, { create: true });
-      
+
       if (relativeParent) {
         await loadDirectoryChildren(relativeParent);
       } else {
@@ -443,7 +447,6 @@ export function useAppState() {
       const dirHandle = getDirHandle();
       const rootName = dirHandle.name;
 
-      
       const relativeDest = stripRoot(destPath, rootName);
       const destParts = relativeDest ? relativeDest.split('/').filter(Boolean) : [];
       let destDirHandle = dirHandle;
@@ -453,7 +456,6 @@ export function useAppState() {
         }
       }
 
-      
       const sourceRelative = stripRoot(clipboard.path, rootName);
       const sourceParts = sourceRelative.split('/');
       const sourceName = sourceParts.pop();
@@ -466,10 +468,8 @@ export function useAppState() {
       }
       const sourceHandle = await sourceParentHandle.getFileHandle(sourceName);
 
-      
       await sourceHandle.move(destDirHandle, sourceName);
 
-      
       const sourceParentPath = sourceParentParts.join('/');
       if (sourceParentPath) {
         await loadDirectoryChildren(sourceParentPath);
@@ -503,6 +503,17 @@ export function useAppState() {
         return;
       }
       const result = await api.runFile(filePath, workspace?.path, fileEntry.content);
+
+      
+      if (result.preview) {
+        setPreview(result.preview);
+        setPreviewType(result.preview_type);
+        setActiveBottomTab("preview");
+        setBottomPanelVisible(true);
+        setOutputs(prev => [...prev, { type: "info", message: `Preview ready: ${fileName}`, timestamp: new Date().toISOString() }]);
+        return;
+      }
+
       if (result.stdout) {
         setOutputs(prev => [...prev, { type: "stdout", message: result.stdout, timestamp: new Date().toISOString() }]);
       }
@@ -528,6 +539,12 @@ export function useAppState() {
       setDebugLogs(prev => [...prev, { type: "error", message: `Run failed: ${err.message}`, timestamp: new Date().toISOString() }]);
     }
   }, [workspace, openFiles]);
+
+  
+  const clearPreview = useCallback(() => {
+    setPreview(null);
+    setPreviewType(null);
+  }, []);
 
   const startDebug = useCallback(async (filePath) => {
     setIsDebugging(true);
@@ -623,6 +640,7 @@ export function useAppState() {
     outputs, debugLogs, ports, terminalSessions, activeTerminalId,
     showFolderPicker, contextMenu, fileTree, autoSave, clipboard,
     expandedPaths, isDebugging, loadingPaths,
+    preview, previewType, clearPreview,
     setSidebarWidth, setBottomPanelHeight, setActiveBottomTab,
     setSidebarVisible, setBottomPanelVisible,
     setShowFolderPicker, setActiveTerminalId,

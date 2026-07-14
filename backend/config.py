@@ -15,7 +15,7 @@ BINARY_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 }
 
-MAX_FILE_SIZE = 1024 * 1024
+MAX_FILE_SIZE = 1024 * 1024  # 1 MB
 
 LANGUAGE_RUNNERS = {
     "python": {
@@ -29,11 +29,11 @@ LANGUAGE_RUNNERS = {
         "run_flag": "",
     },
     "javascript": {
-        "ext": [".js", ".jsx", ".mjs", ".cjs"],
+        "ext": [".js", ".mjs", ".cjs"],
         "command": "node",
     },
     "typescript": {
-        "ext": [".ts", ".tsx"],
+        "ext": [".ts"],
         "command": "tsx",
     },
     "c": {
@@ -110,9 +110,5 @@ LANGUAGE_RUNNERS = {
     "powershell": {
         "ext": [".ps1"],
         "command": "pwsh",
-    },
-    "html": {
-        "ext": [".html", ".htm"],
-        "command": "echo",
     },
 }

@@ -9,6 +9,7 @@ import ProblemsPanel from "./ProblemsPanel";
 import OutputPanel from "./OutputPanel";
 import DebugConsole from "./DebugConsole";
 import PortsPanel from "./PortsPanel";
+import PreviewPanel from "./PreviewPanel";
 import StatusBar from "./StatusBar";
 import ContextMenu from "./ContextMenu";
 import { useAppState } from "../hooks/useAppState";
@@ -21,6 +22,7 @@ export default function App() {
     outputs, debugLogs, ports, terminalSessions, activeTerminalId,
     contextMenu, fileTree, autoSave,
     expandedPaths, isDebugging, loadingPaths,
+    preview, previewType, clearPreview,
     setSidebarWidth, setBottomPanelHeight, setActiveBottomTab,
     setSidebarVisible, setBottomPanelVisible,
     openFile, closeFile, setActiveFile, saveFile, saveAllFiles, updateFileContent,
@@ -122,7 +124,7 @@ export default function App() {
   const handleShowPanel = useCallback((tab) => {
     setActiveBottomTab(tab);
     setBottomPanelVisible(true);
-  }, [setActiveBottomTab, setBottomPanelVisible]);
+  }, [setActiveBottomTab, setActiveBottomTab]);
 
   const handleEditorReady = useCallback((editor, monaco) => {
     editorInstanceRef.current = { editor, monaco };
@@ -169,6 +171,7 @@ export default function App() {
     { id: "terminal", label: "Terminal" },
     { id: "problems", label: `Problems${problems.length ? ` (${problems.length})` : ''}` },
     { id: "output", label: "Output" },
+    { id: "preview", label: "Preview" },
     { id: "debug", label: "Debug Console" },
     { id: "ports", label: "Ports" },
   ];
@@ -317,6 +320,13 @@ export default function App() {
                   )}
                   {activeBottomTab === "problems" && <ProblemsPanel problems={problems} onOpenFile={openFile} />}
                   {activeBottomTab === "output" && <OutputPanel outputs={outputs} />}
+                  {activeBottomTab === "preview" && (
+                    <PreviewPanel
+                      preview={preview}
+                      previewType={previewType}
+                      onClose={clearPreview}
+                    />
+                  )}
                   {activeBottomTab === "debug" && <DebugConsole logs={debugLogs} />}
                   {activeBottomTab === "ports" && <PortsPanel ports={ports} />}
                 </div>

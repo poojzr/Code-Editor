@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_python_command() -> str:
-    
     for cmd in ["python3", "python"]:
         try:
             result = subprocess.run(
@@ -357,6 +356,50 @@ def is_vite_project(workspace_path: str) -> bool:
     return False
 
 
+def _inline_assets(html_content: str, base_dir: Path) -> str:
+    def replace_css(match):
+        href = match.group(1)
+        if href.startswith(("http", "//", "data:", "/")):
+            return match.group(0)
+        css_path = base_dir / href
+        if css_path.is_file():
+            try:
+                css_content = css_path.read_text(encoding="utf-8", errors="replace")
+                return f"<style>\n{css_content}\n</style>"
+            except Exception:
+                return match.group(0)
+        return match.group(0)
+
+    html_content = re.sub(
+        r'<link[^>]*href=["\']([^"\']+)["\'][^>]*rel=["\']stylesheet["\'][^>]*/?>',
+        replace_css, html_content,
+    )
+    html_content = re.sub(
+        r'<link[^>]*rel=["\']stylesheet["\'][^>]*href=["\']([^"\']+)["\'][^>]*/?>',
+        replace_css, html_content,
+    )
+
+    def replace_js(match):
+        src = match.group(1)
+        if src.startswith(("http", "//", "data:", "/")):
+            return match.group(0)
+        js_path = base_dir / src
+        if js_path.is_file():
+            try:
+                js_content = js_path.read_text(encoding="utf-8", errors="replace")
+                return f"<script>\n{js_content}\n</script>"
+            except Exception:
+                return match.group(0)
+        return match.group(0)
+
+    html_content = re.sub(
+        r'<script[^>]*src=["\']([^"\']+)["\'][^>]*>\s*</script>',
+        replace_js, html_content,
+    )
+
+    return html_content
+
+
 def run_file(file_path: str, workspace_path: Optional[str] = None, content: Optional[str] = None) -> RunResult:
     if content is not None:
         
@@ -367,7 +410,6 @@ def run_file(file_path: str, workspace_path: Optional[str] = None, content: Opti
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
             return _run_file_from_path(temp_path, temp_dir, file_path)
         finally:
             try:
@@ -383,7 +425,7 @@ def run_file(file_path: str, workspace_path: Optional[str] = None, content: Opti
 
 def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, original_path: Optional[str] = None) -> RunResult:
     path = Path(file_path)
-    # Only use workspace_path as cwd if it actually exists on this server
+    
     if workspace_path and os.path.isdir(workspace_path):
         cwd = workspace_path
     else:
@@ -391,15 +433,24 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
     ext = path.suffix.lower()
     filename = original_path or str(path)
 
+    
     if ext in (".html", ".htm"):
-        return RunResult(
-            stdout=f"HTML file: {filename}\nOpen in browser: {path.resolve().as_uri()}",
-            exit_code=0,
-        )
+        try:
+            html_content = path.read_text(encoding="utf-8", errors="replace")
+            html_content = _inline_assets(html_content, path.parent)
+            return RunResult(
+                stdout=f"HTML Preview: {filename}",
+                exit_code=0,
+                preview=html_content,
+                preview_type="html",
+            )
+        except Exception as e:
+            return RunResult(stderr=f"Error reading HTML: {e}", exit_code=1)
 
+    
     if ext in (".css", ".scss", ".less", ".json", ".md", ".txt"):
         try:
-            content = path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8", errors="replace")
             return RunResult(
                 stdout=f"{filename}\n\n{content[:2000]}" if content else f"{filename} is empty",
                 exit_code=0,
@@ -407,9 +458,24 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
         except Exception as e:
             return RunResult(stderr=f"Error reading file: {e}", exit_code=1)
 
-    if ext in (".jsx", ".tsx") and workspace_path and os.path.isdir(workspace_path) and is_vite_project(workspace_path):
-        return _run_vite_project(workspace_path)
+    
+    if ext in (".jsx", ".tsx"):
+        if workspace_path and os.path.isdir(workspace_path) and is_vite_project(workspace_path):
+            return _run_vite_project(workspace_path)
+        return RunResult(
+            stderr=(
+                "JSX/TSX files contain React syntax that Node.js cannot execute directly.\n"
+                "These files require a bundler (like Vite) to compile JSX into standard JavaScript.\n\n"
+                "To run JSX/TSX files:\n"
+                "  1. Set up a Vite + React project (npm create vite@latest)\n"
+                "  2. Open the project folder in this editor\n"
+                "  3. Click Run — it will start the Vite dev server automatically\n\n"
+                "For plain JavaScript (without JSX syntax), use the .js extension instead."
+            ),
+            exit_code=1,
+        )
 
+    
     runner = detect_runner(file_path)
     if not runner:
         return RunResult(stderr=f"No runner configured for {ext} files", exit_code=1)
@@ -417,6 +483,7 @@ def _run_file_from_path(file_path: str, workspace_path: Optional[str] = None, or
     if "compile" in runner:
         return _run_compiled(path, runner, cwd, original_path)
 
+    
     command = runner["command"]
     quoted_path = quote_path(str(path))
 
@@ -490,6 +557,7 @@ def _run_compiled(path: Path, runner: dict, cwd: str, original_path: Optional[st
         except FileNotFoundError:
             return RunResult(stderr=f"Compiler not found: {compiler}", exit_code=127)
     else:
+        
         compile_cmd = f"{compiler} {quoted_path} {runner.get('run_flag', '-o')} {quoted_output}"
         try:
             compile_result = subprocess.run(
@@ -580,15 +648,16 @@ def _run_vite_project(workspace_path: str) -> RunResult:
         return RunResult(stderr=f"Failed to start Vite: {str(e)}", exit_code=1)
 
 
+
+
 FILE_EXECUTION_MESSAGE = (
-    "  This terminal runs on the server and cannot access files from your browser.\n"
+    " This terminal runs on the server and cannot access files from your browser.\n"
     "   Use the Run button in the toolbar to execute your code.\n"
     "   This terminal is for server-side commands like: python --version, pip install, ls, etc."
 )
 
 
 def _is_file_execution_attempt(command: str, cwd: str) -> bool:
-    
     parts = command.split()
     if not parts:
         return False
